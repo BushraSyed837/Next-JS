@@ -96,47 +96,47 @@ async function scrapeListingPage(page = 1) {
 
 // ✅ API handler
 export async function GET(request) {
-    try {
-      if (request.method !== "GET") {
-        return new Response("Method Not Allowed", { status: 405 });
-      }
-  
-      const { searchParams } = new URL(request.url);
-      const page = parseInt(searchParams.get("page")) || 1;
-      const limit = parseInt(searchParams.get("limit")) || 20;
-  
-      const productIds = await scrapeListingPage(page);
-      if (!productIds.length) {
-        return new Response(JSON.stringify({ products: [], pagination: {} }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-  
-      const paginatedIds = productIds.slice(0, limit);
-      const results = await Promise.allSettled(paginatedIds.map(id => fetchProductDetails(id)));
-      const products = results.filter(r => r.status === "fulfilled").map(r => r.value);
-  
-      return new Response(
-        JSON.stringify({
-          products,
-          pagination: {
-            page,
-            limit,
-            totalProducts: productIds.length,
-            hasNextPage: limit < productIds.length,
-          },
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }
-      );
-    } catch (error) {
-      console.error("API Error:", error.message);
-      return new Response(JSON.stringify({ error: "Failed to fetch products" }), {
-        status: 500,
+  try {
+    if (request.method !== "GET") {
+      return new Response("Method Not Allowed", { status: 405 });
+    }
+
+    const { searchParams } = new URL(request.url);
+    const page = parseInt(searchParams.get("page")) || 1;
+    const limit = parseInt(searchParams.get("limit")) || 20;
+
+    const productIds = await scrapeListingPage(page);
+    if (!productIds.length) {
+      return new Response(JSON.stringify({ products: [], pagination: {} }), {
+        status: 200,
         headers: { "Content-Type": "application/json" },
       });
     }
+
+    const paginatedIds = productIds.slice(0, limit);
+    const results = await Promise.allSettled(paginatedIds.map(id => fetchProductDetails(id)));
+    const products = results.filter(r => r.status === "fulfilled").map(r => r.value);
+
+    return new Response(
+      JSON.stringify({
+        products,
+        pagination: {
+          page,
+          limit,
+          totalProducts: productIds.length,
+          hasNextPage: limit < productIds.length,
+        },
+      }),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+  } catch (error) {
+    console.error("API Error:", error.message);
+    return new Response(JSON.stringify({ error: "Failed to fetch products" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
   }
+}
