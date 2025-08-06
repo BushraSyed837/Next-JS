@@ -1,29 +1,25 @@
 import axios from "axios";
 import * as cheerio from "cheerio";
 
+const PLACEHOLDER_IMG = "https://placehold.co/220x150?text=No+Image";
+
+// ✅ Fetch product details
 async function fetchProductDetails(productId) {
   try {
     const productUrl = `https://minutes.noon.com/uae-en/now-product/${productId}/`;
     const { data } = await axios.get(productUrl, {
       headers: {
         "User-Agent": "Mozilla/5.0",
-        Accept:
-          "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
-        "Accept-Encoding": "gzip, deflate, br",
-        Connection: "keep-alive",
-        "Upgrade-Insecure-Requests": "1",
+        Accept: "text/html,application/xhtml+xml",
       },
-      timeout: 10000, // 10 second timeout
+      timeout: 8000, // 8s
     });
 
     const $ = cheerio.load(data);
 
-    // Extract basic product info
     const productInfo = {
       productId,
-      productUrl: productUrl,
-      images: [],
+      productUrl,
       productName: "",
       brand: "",
       price: "",
@@ -31,244 +27,91 @@ async function fetchProductDetails(productId) {
       size: "",
       origin: "",
       description: "",
+      images: [],
     };
 
-    // Extract product name and brand
-    $('h1, .product-title, [data-testid*="title"]').each((i, el) => {
-      const text = $(el).text().trim();
-      if (text && !productInfo.productName) {
-        if (text.includes("'s")) {
-          const parts = text.split("'s");
-          productInfo.brand = parts[0].trim();
-          productInfo.productName = parts[1] ? parts[1].trim() : text;
-        } else {
-          productInfo.productName = text;
-        }
-      }
-    });
+    // ✅ Extract product name
+    const title = $('h1, .product-title, [data-testid*="title"]').first().text().trim();
+    productInfo.productName = title || `Product ${productId}`;
 
-    // Extract price
-    // Use a robust selector for price
-    const priceElement = $('span:contains("AED"), span:contains("د.إ"), span')
-      .filter((i, el) => {
-        return $(el)
-          .text()
-          .trim()
-          .match(/^\s*(AED|د\.إ)?\s*\d+(\.\d+)?/);
-      })
-      .first();
-
+    // ✅ Extract price
+    const priceElement = $('span:contains("AED"), span:contains("د.إ")').first();
     if (priceElement.length) {
       const text = priceElement.text().trim();
       const priceMatch = text.match(/[\d.,]+/);
-      if (priceMatch) {
-        productInfo.price = priceMatch[0];
-        const currencyMatch = text.match(/[^\d.,\s]+/);
-        if (currencyMatch) {
-          productInfo.currency = currencyMatch[0];
-        }
-      }
+      productInfo.price = priceMatch ? priceMatch[0] : "";
+      productInfo.currency = text.includes("AED") ? "AED" : "د.إ";
     }
 
-    // Extract size/quantity
-    $('[class*="size"], [class*="weight"], [class*="quantity"]').each(
-      (i, el) => {
-        const text = $(el).text().trim();
-        if (
-          text &&
-          (text.includes("g") || text.includes("kg") || text.includes("Punnet"))
-        ) {
-          productInfo.size = text;
-        }
-      }
-    );
-
-    // Extract images (higher quality from product detail page)
+    // ✅ Extract image
     $('img[src*="nooncdn.com"]').each((i, el) => {
       const src = $(el).attr("src");
-      if (src && !src.includes("svg") && !src.includes("data:")) {
+      if (src && !src.includes("svg")) {
         productInfo.images.push(src);
       }
     });
 
-    // Extract origin/country
-    $('[class*="origin"], [class*="country"]').each((i, el) => {
-      const text = $(el).text().trim();
-      if (text && !productInfo.origin) {
-        productInfo.origin = text;
-      }
-    });
-
-    // Extract description
-    $('[class*="description"], [class*="desc"], p').each((i, el) => {
-      const text = $(el).text().trim();
-      if (text && text.length > 50 && !productInfo.description) {
-        productInfo.description = text;
-      }
-    });
-
-    return productInfo;
+    return {
+      productUrl: productInfo.productUrl,
+      images: productInfo.images.length ? productInfo.images : [PLACEHOLDER_IMG],
+      productName: productInfo.productName,
+      price: productInfo.price ? `${productInfo.currency} ${productInfo.price}` : "AED 0.00",
+      weight: productInfo.size || "",
+      country: productInfo.origin || "",
+    };
   } catch (error) {
-    console.error(
-      `Error fetching product details for ${productId}:`,
-      error.message
-    );
-    return null;
+    console.error(`Error fetching product details for ${productId}: ${error.message}`);
+    return {
+      productUrl: `https://minutes.noon.com/uae-en/now-product/${productId}/`,
+      images: [PLACEHOLDER_IMG],
+      productName: `Product ${productId}`,
+      price: "AED 0.00",
+      weight: "",
+      country: "",
+    };
   }
 }
 
-// Scrape all listing pages to get all product IDs
-async function scrapeAllListingPages() {
-  const allProductIds = new Set();
-  const totalPages = 5; // There are 5 pages of products
-
-  console.log(`Scraping all ${totalPages} listing pages...`);
-
-  for (let page = 1; page <= totalPages; page++) {
-    try {
-      const listingUrl = `https://minutes.noon.com/uae-en/search/?f[category]=fruits_vegetables&page=${page}`;
-      console.log(`Scraping listing page ${page}...`);
-
-      const { data } = await axios.get(listingUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0",
-          Accept:
-            "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-          "Accept-Language": "en-US,en;q=0.5",
-          "Accept-Encoding": "gzip, deflate, br",
-          Connection: "keep-alive",
-          "Upgrade-Insecure-Requests": "1",
-        },
-        timeout: 15000,
-      });
-
-      const $ = cheerio.load(data);
-
-      // Extract product IDs from this page
-      let pageProductCount = 0;
-      $('a[href*="/now-product/"]').each((i, el) => {
-        const href = $(el).attr("href");
-        if (href) {
-          const match = href.match(/\/now-product\/([^\/]+)/);
-          if (match) {
-            allProductIds.add(match[1]);
-            pageProductCount++;
-          }
-        }
-      });
-
-      console.log(`Page ${page}: Found ${pageProductCount} product IDs`);
-
-      // Small delay between pages to be respectful
-      if (page < totalPages) {
-        await new Promise((resolve) => setTimeout(resolve, 200));
-      }
-    } catch (error) {
-      console.error(`Error scraping page ${page}:`, error.message);
-      // Continue with next page even if one fails
-    }
-  }
-
-  console.log(
-    `Total unique product IDs found across all pages: ${allProductIds.size}`
-  );
-  return Array.from(allProductIds);
-}
-
-// Process products in batches with parallel requests
-async function processProductBatch(productIds, batchSize = 10) {
-  const results = [];
-
-  for (let i = 0; i < productIds.length; i += batchSize) {
-    const batch = productIds.slice(i, i + batchSize);
-    console.log(
-      `Processing batch ${Math.floor(i / batchSize) + 1}: ${
-        batch.length
-      } products`
-    );
-
-    // Process batch in parallel
-    const batchPromises = batch.map(async (productId) => {
-      try {
-        const result = await fetchProductDetails(productId);
-        return result;
-      } catch (error) {
-        console.error(`Failed to fetch ${productId}:`, error.message);
-        return null;
-      }
+// ✅ Scrape one listing page for product IDs
+async function scrapeListingPage(page = 1) {
+  try {
+    const url = `https://minutes.noon.com/uae-en/search/?f[category]=fruits_vegetables&page=${page}`;
+    const { data } = await axios.get(url, {
+      headers: { "User-Agent": "Mozilla/5.0" },
+      timeout: 10000,
     });
-
-    // Wait for all requests in batch to complete
-    const batchResults = await Promise.allSettled(batchPromises);
-
-    // Extract successful results
-    batchResults.forEach((result, index) => {
-      if (result.status === "fulfilled" && result.value) {
-        const productDetails = result.value;
-        console.log(">>>> Debug product scraped:", {
-          productId: productDetails.productId,
-          productName: productDetails.productName,
-          price: productDetails.price,
-          currency: productDetails.currency,
-        });
-        results.push({
-          productUrl: productDetails.productUrl,
-          images: productDetails.images,
-          productName:
-            productDetails.productName || productDetails.brand || "Product",
-          price: productDetails.price
-            ? `${productDetails.currency || ""} ${productDetails.price}`
-            : "฿ 10.65",
-          weight: productDetails.size || "",
-          country: productDetails.origin || "",
-          countryFlag: "", // Will be empty for now
-        });
-      }
+    const $ = cheerio.load(data);
+    const ids = [];
+    $('a[href*="/now-product/"]').each((i, el) => {
+      const href = $(el).attr("href");
+      const match = href.match(/\/now-product\/([^\/]+)/);
+      if (match) ids.push(match[1]);
     });
-
-    // Small delay between batches to be respectful
-    if (i + batchSize < productIds.length) {
-      await new Promise((resolve) => setTimeout(resolve, 100)); // Reduced delay
-    }
+    return ids;
+  } catch (err) {
+    console.error(`Error scraping listing page ${page}: ${err.message}`);
+    return [];
   }
-
-  return results;
 }
 
+// ✅ API handler
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
     const page = parseInt(searchParams.get("page")) || 1;
-    const limit = parseInt(searchParams.get("limit")) || 50; // Default 50 per page
-    const startIndex = (page - 1) * limit;
-    const endIndex = startIndex + limit;
+    const limit = parseInt(searchParams.get("limit")) || 20;
 
-    // Scrape all listing pages to get all product IDs
-    const allProductIds = await scrapeAllListingPages();
+    // ✅ Scrape only 1 listing page for speed
+    const productIds = await scrapeListingPage(1);
+    if (!productIds.length) throw new Error("No products found");
 
-    if (allProductIds.length === 0) {
-      throw new Error("No product IDs found on any listing page");
-    }
+    const paginatedIds = productIds.slice(0, limit);
 
-    console.log(`Total products available: ${allProductIds.length}`);
-
-    // Apply pagination to all products
-    const totalProducts = allProductIds.length;
-    const paginatedProductIds = allProductIds.slice(startIndex, endIndex);
-
-    console.log(
-      `Processing products ${startIndex + 1} to ${Math.min(
-        endIndex,
-        totalProducts
-      )} of ${totalProducts}`
-    );
-
-    // Process products in parallel batches
-    const products = await processProductBatch(paginatedProductIds, 10); // Process 10 at a time
-
-    console.log(
-      `Successfully fetched ${products.length} products for page ${page}`
-    );
+    // ✅ Fetch product details in parallel
+    const results = await Promise.allSettled(paginatedIds.map(id => fetchProductDetails(id)));
+    const products = results
+      .filter(r => r.status === "fulfilled")
+      .map(r => r.value);
 
     return new Response(
       JSON.stringify({
@@ -276,10 +119,8 @@ export async function GET(request) {
         pagination: {
           page,
           limit,
-          totalProducts,
-          totalPages: Math.ceil(totalProducts / limit),
-          hasNextPage: endIndex < totalProducts,
-          hasPrevPage: page > 1,
+          totalProducts: productIds.length,
+          hasNextPage: limit < productIds.length,
         },
       }),
       {
@@ -288,16 +129,10 @@ export async function GET(request) {
       }
     );
   } catch (error) {
-    console.error("Error scraping products:", error.message);
-    return new Response(
-      JSON.stringify({
-        error: "Failed to fetch products",
-        details: error.message,
-      }),
-      {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      }
-    );
+    console.error("API Error:", error.message);
+    return new Response(JSON.stringify({ error: "Failed to fetch products" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 }
